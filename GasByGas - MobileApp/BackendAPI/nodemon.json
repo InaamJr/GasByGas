@@ -1,0 +1,7 @@
+{
+  "start": "nodemon --watch ./ --delay 2 server.js",
+  "watch": ["./"],
+  "ext": "js,json",
+  "ignore": ["node_modules"],
+  "exec": "node server.js"
+}

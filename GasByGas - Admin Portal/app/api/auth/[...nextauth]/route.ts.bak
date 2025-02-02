@@ -1,0 +1,109 @@
+import { NextAuthOptions } from "next-auth";
+import CredentialsProvider from "next-auth/providers/credentials";
+import NextAuth from "next-auth/next";
+import pool from '@/lib/db';
+
+export const authOptions: NextAuthOptions = {
+  debug: true, // Enable debug logs
+  pages: {
+    signIn: "/",
+  },
+  session: {
+    strategy: "jwt",
+    maxAge: 24 * 60 * 60, // 24 hours
+  },
+  providers: [
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        username: { label: "Username", type: "text" },
+        password: { label: "Password", type: "password" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.username || !credentials?.password) {
+          console.log("Missing credentials");
+          throw new Error("Missing username or password");
+        }
+
+        try {
+          console.log("Login attempt:", {
+            username: credentials.username,
+          });
+
+          const connection = await pool.getConnection();
+          
+          try {
+            // First check if user exists
+            const [rows] = await connection.execute(
+              'SELECT * FROM head_office_admin WHERE username = ?',
+              [credentials.username]
+            );
+
+            const users = rows as any[];
+            const user = users[0];
+
+            if (!user) {
+              console.log("User not found:", credentials.username);
+              throw new Error("Invalid username or password");
+            }
+
+            // Then check if user is active
+            if (user.status !== 'active') {
+              console.log("User is not active:", credentials.username);
+              throw new Error("Account is not active");
+            }
+
+            console.log("Found user:", {
+              id: user.admin_id,
+              name: user.name,
+              email: user.email,
+              status: user.status,
+              isSuperAdmin: user.is_super_admin,
+            });
+
+            // Direct password comparison
+            if (credentials.password !== user.password) {
+              throw new Error("Invalid username or password");
+            }
+
+            // Return user data
+            const userData = {
+              id: user.admin_id.toString(),
+              name: user.name,
+              email: user.email,
+              image: user.profile_image?.toString('base64') || null,
+              isSuperAdmin: Boolean(user.is_super_admin),
+            };
+            console.log("Login successful, returning user data:", userData);
+            return userData;
+
+          } finally {
+            connection.release();
+          }
+        } catch (error) {
+          console.error("Authentication error:", error);
+          throw error;
+        }
+      }
+    }),
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.id = user.id;
+        token.isSuperAdmin = user.isSuperAdmin;
+      }
+      return token;
+    },
+    async session({ session, token }) {
+      if (session?.user) {
+        session.user.id = token.id as string;
+        session.user.isSuperAdmin = token.isSuperAdmin as boolean;
+      }
+      return session;
+    },
+  },
+};
+
+const handler = NextAuth(authOptions);
+export { handler as GET, handler as POST };
